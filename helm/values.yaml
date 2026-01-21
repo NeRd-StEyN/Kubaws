@@ -1,0 +1,9 @@
+replicaCount: 2
+
+image:
+  backend: backend:latest
+  frontend: frontend:latest
+
+service:
+  backendPort: 5000
+  frontendPort: 80

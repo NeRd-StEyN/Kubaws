@@ -1,0 +1,21 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.972.0",
+    "@aws-sdk/client-sns": "^3.972.0",
+    "@aws-sdk/lib-dynamodb": "^3.972.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "prom-client": "^15.1.3"
+  }
+}
