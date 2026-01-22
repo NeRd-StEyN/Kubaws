@@ -1,0 +1,107 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+
+env:
+  REGISTRY: ghcr.io
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Frontend
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=raw,value=latest
+
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for Backend
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=ref,event=branch
+            type=raw,value=latest
+
+      - name: Build and push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update deployment manifest
+        run: |
+          echo "Frontend image: ${{ steps.frontend-meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "Backend image: ${{ steps.backend-meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Images built and pushed successfully!" >> $GITHUB_STEP_SUMMARY
+
+  # Optional: SSH into EC2 and update containers
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: false  # Set to true when you add SSH key to secrets
+    
+    steps:
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ec2-user
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          echo "$SSH_PRIVATE_KEY" > key.pem
+          chmod 600 key.pem
+          
+          ssh -o StrictHostKeyChecking=no -i key.pem $EC2_USER@$EC2_HOST << 'EOF'
+            # Pull latest images
+            docker pull ${{ env.FRONTEND_IMAGE }}:latest
+            docker pull ${{ env.BACKEND_IMAGE }}:latest
+            
+            # Stop old containers
+            docker stop frontend backend || true
+            docker rm frontend backend || true
+            
+            # Start new containers
+            docker run -d --name frontend -p 80:80 --restart always ${{ env.FRONTEND_IMAGE }}:latest
+            docker run -d --name backend -p 5000:5000 --restart always ${{ env.BACKEND_IMAGE }}:latest
+          EOF

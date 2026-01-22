@@ -15,6 +15,40 @@ provider "aws" {
   region = var.aws_region
 }
 
+# --- 0. Security Group ---
+resource "aws_security_group" "app_sg" {
+  name        = "devops_app_sg"
+  description = "Allow web traffic"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 5000
+    to_port     = 5000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # --- 0. Find latest Amazon Linux 2 AMI ---
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
@@ -57,65 +91,65 @@ resource "aws_instance" "app_server" {
   ami           = data.aws_ami.amazon_linux_2.id
   instance_type = "t2.micro"
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
 
   tags = { Name = "DevOpsStepByStep-Server" }
 
   user_data = <<-EOF
               #!/bin/bash
+              set -e
+              exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              
+              echo "=== DevOps Demo: Docker Setup ==="
               yum update -y
               
-              # 1. Install K3s (Lightweight Kubernetes)
-              # --write-kubeconfig-mode 644 allows the 'ec2-user' to use kubectl without sudo
-              curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
-
-              # 2. Wait for K3s to be ready
-              sleep 30
-
-              # 3. Create a Namespace
-              /usr/local/bin/kubectl create namespace app
-
-              # 4. Deploy Backend directly via K8s
-              cat <<EOM > /home/ec2-user/app-deploy.yaml
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: backend
-                namespace: app
-              spec:
-                replicas: 1
-                selector:
-                  matchLabels:
-                    app: backend
-                template:
-                  metadata:
-                    labels:
-                      app: backend
-                  spec:
-                    containers:
-                    - name: backend
-                      image: node:20-slim # Using a public image for demo, in prod use your ECR/DockerHub
-                      env:
-                      - name: SNS_TOPIC_ARN
-                        value: ${aws_sns_topic.alerts.arn}
-                      - name: AWS_REGION
-                        value: ${var.aws_region}
-                      ports:
-                      - containerPort: 5000
-              ---
-              apiVersion: v1
-              kind: Service
-              metadata:
-                name: backend-service
-                namespace: app
-              spec:
-                selector:
-                  app: backend
-                ports:
-                - port: 5000
-                  targetPort: 5000
-              EOM
-
-              /usr/local/bin/kubectl apply -f /home/ec2-user/app-deploy.yaml
+              # Install Docker
+              echo "Installing Docker..."
+              amazon-linux-extras install docker -y
+              systemctl start docker
+              systemctl enable docker
+              usermod -a -G docker ec2-user
+              
+              # Wait for Docker to be ready
+              echo "Waiting for Docker daemon..."
+              sleep 5
+              
+              # Pull custom images from GitHub Container Registry (public, no auth needed)
+              # Note: Replace YOUR_GITHUB_USERNAME with actual username
+              GITHUB_REPO="ghcr.io/nerd-steyn/kubaws"
+              
+              echo "Pulling Frontend image..."
+              docker pull $GITHUB_REPO/frontend:latest || docker pull nginx:alpine
+              
+              echo "Pulling Backend image..."  
+              docker pull $GITHUB_REPO/backend:latest || docker pull python:3.9-slim
+              
+              # Run Frontend (React app on port 80)
+              echo "Starting Frontend container..."
+              docker run -d \
+                --name frontend \
+                --restart always \
+                -p 80:80 \
+                $GITHUB_REPO/frontend:latest 2>/dev/null || \
+                docker run -d --name frontend --restart always -p 80:80 nginx:alpine
+              
+              # Run Backend (Node.js API on port 5000)
+              echo "Starting Backend container..."
+              docker run -d \
+                --name backend \
+                --restart always \
+                -p 5000:5000 \
+                -e PORT=5000 \
+                $GITHUB_REPO/backend:latest 2>/dev/null || \
+                docker run -d --name backend --restart always -p 5000:5000 python:3.9-slim python3 -m http.server 5000
+              
+              # Verify containers are running
+              echo "=== Containers Status ==="
+              docker ps
+              
+              echo "=== Setup Complete! ==="
+              echo "Frontend: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):80"
+              echo "Backend:  http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5000"
               EOF
 }
 
