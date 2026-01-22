@@ -10,7 +10,7 @@ function App() {
   const fetchMessages = async () => {
     setLoading(true)
     try {
-      const response = await fetch('http://localhost:5000/api/message')
+      const response = await fetch(`http://${window.location.hostname}:5000/api/message`)
       const data = await response.json()
       setMessages(data.data || [])
     } catch (err) {
@@ -26,7 +26,7 @@ function App() {
 
     setLoading(true)
     try {
-      const response = await fetch('http://localhost:5000/api/message', {
+      const response = await fetch(`http://${window.location.hostname}:5000/api/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText })
