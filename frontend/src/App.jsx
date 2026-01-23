@@ -32,11 +32,17 @@ function App() {
         body: JSON.stringify({ text: inputText })
       })
       const result = await response.json()
-      setStatus('Success: Saved to DynamoDB!')
+
+      // Show both DynamoDB and SNS status
+      const snsInfo = result.snsNotification
+        ? `\n📧 Email Alert: ${result.snsNotification}`
+        : '';
+      setStatus(`✅ Saved to DynamoDB!${snsInfo}`)
+
       setInputText('')
       fetchMessages() // Refresh list
     } catch (err) {
-      setStatus('Error: Could not reach backend')
+      setStatus('❌ Error: Could not reach backend')
     } finally {
       setLoading(false)
     }

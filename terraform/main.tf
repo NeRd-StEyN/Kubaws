@@ -74,22 +74,38 @@ resource "aws_dynamodb_table" "messages" {
   }
 }
 
-# --- 2. SNS Topic (Free Tier: 1M Requests) ---
+# --- 2. MULTI-CHANNEL NOTIFICATIONS (SNS) ---
 resource "aws_sns_topic" "alerts" {
   name = "devops-app-alerts"
 }
 
-# Subscribe your email here (Manual step for security, or via Terraform if you are brave)
-# resource "aws_sns_topic_subscription" "email" {
+# 1. EMAIL ALERT
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = "nipun0411@gmail.com"
+}
+
+# 2. MOBILE SMS ALERT
+resource "aws_sns_topic_subscription" "sms" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "sms"
+  endpoint  = "+919075850416" # ⚠️ REPLACE WITH YOUR PHONE NUMBER (E.164 format)
+}
+
+# 3. MOBILE PUSH NOTIFICATION (Example structure)
+# Note: For Push (pop-ups), you must create a "Platform Application" first.
+# resource "aws_sns_topic_subscription" "mobile_push" {
 #   topic_arn = aws_sns_topic.alerts.arn
-#   protocol  = "email"
-#   endpoint  = "your-email@example.com"
+#   protocol  = "application"
+#   endpoint  = "arn:aws:sns:REGION:ACCOUNT_ID:endpoint/GCM/MyMobileApp/DeviceID"
 # }
 
 # --- 3. EC2 Instance (Free Tier: t2.micro) ---
 resource "aws_instance" "app_server" {
   ami           = data.aws_ami.amazon_linux_2.id
   instance_type = "t2.micro"
+  key_name      = "devops-key"
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
@@ -140,6 +156,8 @@ resource "aws_instance" "app_server" {
                 --restart always \
                 -p 5000:5000 \
                 -e PORT=5000 \
+                -e AWS_REGION=${var.aws_region} \
+                -e SNS_TOPIC_ARN=${aws_sns_topic.alerts.arn} \
                 $GITHUB_REPO/backend:latest 2>/dev/null || \
                 docker run -d --name backend --restart always -p 5000:5000 python:3.9-slim python3 -m http.server 5000
               

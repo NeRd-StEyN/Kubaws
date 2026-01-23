@@ -83,16 +83,28 @@ app.post('/api/message', async (req, res) => {
             Item: newItem
         }));
 
+        let snsStatus = 'Not Configured';
+
         // 2. Notify via SNS (if configured)
         if (SNS_TOPIC_ARN) {
-            await snsClient.send(new PublishCommand({
-                TopicArn: SNS_TOPIC_ARN,
-                Message: `New message received in DevOps App: "${text}"`,
-                Subject: "DevOps App Notification"
-            }));
+            try {
+                await snsClient.send(new PublishCommand({
+                    TopicArn: SNS_TOPIC_ARN,
+                    Message: `New message received in DevOps App: "${text}"`,
+                    Subject: "DevOps App Notification"
+                }));
+                snsStatus = 'Sent Successfully ✅';
+            } catch (snsErr) {
+                console.error('SNS Error:', snsErr);
+                snsStatus = `Failed: ${snsErr.message}`;
+            }
         }
 
-        res.status(201).json({ status: 'Saved to DynamoDB + SNS Sent', item: newItem });
+        res.status(201).json({
+            status: 'Saved to DynamoDB',
+            snsNotification: snsStatus,
+            item: newItem
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Cloud action failed', details: err.message });
